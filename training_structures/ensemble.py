@@ -10,7 +10,24 @@ from tqdm import tqdm
 softmax = nn.Softmax()
 
 
-def train(encoders, heads, ensemble, train_dataloader, valid_dataloader, total_epochs, early_stop=False, optimtype=torch.optim.RMSprop, lr=0.001, weight_decay=0.0, criterion=nn.CrossEntropyLoss(), auprc=False, save_model='ensemble.pt', modalities=[0], task='classification', track_complexity=True):
+def deal_with_objective(objective, pred, truth, args):
+    """Alter inputs depending on objective function, to deal with different objective arguments."""
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if type(objective) == nn.CrossEntropyLoss:
+        if len(truth.size()) == len(pred.size()):
+            truth1 = truth.squeeze(len(pred.size())-1)
+        else:
+            truth1 = truth
+        return objective(pred, truth1.long().to(device))
+    elif type(objective) == nn.MSELoss or type(objective) == nn.modules.loss.BCEWithLogitsLoss or type(objective) == nn.L1Loss:
+        return objective(pred, truth.float().to(device))
+    else:
+        return objective(pred, truth, args)
+
+
+def train(encoders, heads, ensemble, train_dataloader, valid_dataloader, total_epochs, early_stop=False, optimtype=torch.optim.RMSprop, 
+            lr=0.001, weight_decay=0.0, criterion=nn.CrossEntropyLoss(), auprc=False, 
+            save_model='ensemble.pt', modalities=[0], task='classification', track_complexity=True, objective_args_dict={}):
     """Train ensemble module.
 
     Args:
@@ -51,12 +68,14 @@ def train(encoders, heads, ensemble, train_dataloader, valid_dataloader, total_e
             totals = 0
             for j in train_dataloader:
                 op.zero_grad()
-                out = model(j)
-                
+                out, outs = model(j)
+                # print('out', outs[0].shape, outs[1].shape)
+                objective_args_dict['outs'] = outs
                 if type(criterion) == torch.nn.modules.loss.BCEWithLogitsLoss:
-                    loss = criterion(out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
+                    loss = deal_with_objective(criterion, out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")), objective_args_dict)
                 else:
-                    loss = criterion(out, j[-1].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
+                    loss = deal_with_objective(criterion, out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")), objective_args_dict)
+                print('loss', j[-1])
                 totalloss += loss * len(j[-1])
                 totals += len(j[-1])
                 loss.backward()
@@ -69,11 +88,13 @@ def train(encoders, heads, ensemble, train_dataloader, valid_dataloader, total_e
                 true = []
                 pts = []
                 for j in valid_dataloader:
-                    out = model(j)
+                    out, outs = model(j)
+                    print('out', outs[0].shape, outs[1].shape)
+                    objective_args_dict['outs'] = outs
                     if type(criterion) == torch.nn.modules.loss.BCEWithLogitsLoss:
-                        loss = criterion(out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
+                        loss = deal_with_objective(criterion, out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")), objective_args_dict)
                     else:
-                        loss = criterion(out, j[-1].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
+                        loss = deal_with_objective(criterion, out, j[-1].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")), objective_args_dict)
                     totalloss += loss*len(j[-1])
                     if task == "classification":
                         pred.append(torch.argmax(out, 1))
@@ -147,13 +168,16 @@ def single_test(model, test_dataloader, auprc=False, task='classification', crit
     Returns:
         dict: Dictionary of (metric, value) relations.
     """
+    objective_args_dict={}
     with torch.no_grad():
         pred = []
         true = []
         totalloss = 0
         pts = []
-        for j in test_dataloader:
-            out = model(j)
+        for j in tqdm(test_dataloader):
+            out, outs = model(j)
+            # print('out', outs[0].shape, outs[1].shape)
+            objective_args_dict['outs'] = outs
             if criterion is not None:
                 loss = criterion(out, j[-1].to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
                 totalloss += loss*len(j[-1])
@@ -228,6 +252,7 @@ def test(model, test_dataloaders_all, dataset='default', method_name='My method'
         single_test(model, test_dataloaders_all[list(
             test_dataloaders_all.keys())[0]][0], auprc, task, criterion)
     all_in_one_test(_testprocess, [model])
+
     for noisy_modality, test_dataloaders in test_dataloaders_all.items():
         print("Testing on noisy data ({})...".format(noisy_modality))
         robustness_curve = dict()

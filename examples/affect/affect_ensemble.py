@@ -34,9 +34,9 @@ elif dataset == 'humor' or dataset == 'sarcasm':
 config = [d_v, d_a, d_l]
 d_modalities = [config[i] for i in modalities]
 
-encoders = [GRU(d_modalities[i][0], 600, dropout=True, has_padding=False,
-              batch_first=True, last_only=True).cuda() for i in modalities]
-heads = [MLP(600, 512, 1).cuda() for _ in modalities]
+# train all unimodal models first
+encoders = [torch.load(f'mosiencoder{i}.pt') for i in modalities]
+heads = [torch.load(f'mosihead{i}.pt') for i in modalities]
 ensemble = AdditiveEnsemble().cuda()
 
 

@@ -17,13 +17,14 @@ class AdditiveEnsemble(nn.Module):
         """Initialize Additive Ensemble Module.
         :param models: List of unimodal models
         """
-        super(AdditiveEnsemble, self).__init__()
+        print('initializing ensemble model')
+
         self.models = models
         self.modelnum = len(self.models)
-        self.vars = []
-        for i in range(self.modelnum):
-            # self.vars.append(self.models[i])
-            self.vars.append(nn.Parameter(torch.tensor(1.0), requires_grad=True).cuda())
+        # self.vars = []
+        # for i in range(self.modelnum):
+        #     # self.vars.append(self.models[i])
+        #     self.vars.append(nn.Parameter(torch.tensor(1.0), requires_grad=True).cuda())
         return self
 
     def forward(self, j):
@@ -32,9 +33,12 @@ class AdditiveEnsemble(nn.Module):
         
         :param j: Data input of all modalities
         """
+        outs = []
         sum = 0
         for i in range(self.modelnum):
           model = self.models[i]
           out = model(j[i].float().to(torch.device("cuda:0" if torch.cuda.is_available() else "cpu")))
-          sum += self.vars[i] * out
-        return sum
+          print(out.shape)
+          outs.append(out)
+          sum += out
+        return sum / self.modelnum , outs
